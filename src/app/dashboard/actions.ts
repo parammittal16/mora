@@ -95,6 +95,14 @@ export type IntakeActionResult = {
   draft?: MoraIntakeDraft;
 };
 
+export type PublishActionResult = {
+  ok: boolean;
+  message: string;
+  fieldErrors?: Record<string, string>;
+  handle?: string;
+  publicPath?: string;
+};
+
 const HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,29}$/;
 const GOALS: MoraGoal[] = [
   "get_hired",
@@ -1035,16 +1043,38 @@ export async function generatePortfolioBlueprintAction(): Promise<AiGenerationAc
   };
 }
 
-export async function publishMoraPortfolioAction() {
+export async function publishMoraPortfolioAction(): Promise<PublishActionResult> {
   const { supabase, profile } = await getAuthenticatedProfile();
   const { existing } = await getLatestBlueprint(profile.id);
   const draft = normalizeDraft(readIntakeFromBlueprint(existing?.blueprint_json));
-  const fieldErrors = validateDraft(draft, "submit");
+  const fieldErrors: Record<string, string> = {};
 
-  if (Object.keys(fieldErrors).length > 0 || draft.status !== "submitted") {
+  if (!draft.fullName) fieldErrors.fullName = "Add a name before publishing.";
+  if (!draft.handle) fieldErrors.handle = "Choose a public handle before publishing.";
+  if (!draft.role) fieldErrors.role = "Add a headline before publishing.";
+  if (draft.handle) {
+    const handleError = await assertHandleAvailable(draft.handle, profile.id);
+    if (handleError) fieldErrors.handle = handleError;
+  }
+
+  const { count: portfolioItemCount, error: portfolioItemError } = await supabase
+    .from("portfolio_items")
+    .select("id", { count: "exact", head: true })
+    .eq("profile_id", profile.id);
+
+  if (portfolioItemError) {
+    return { ok: false, message: portfolioItemError.message };
+  }
+
+  if ((portfolioItemCount ?? 0) === 0 && draft.projects.length === 0) {
+    fieldErrors.projects = "Add at least one portfolio item before publishing.";
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
     return {
       ok: false,
-      message: "Complete and submit the intake before publishing.",
+      message: "Complete the required publishing fields first.",
+      fieldErrors,
     };
   }
 
@@ -1076,10 +1106,12 @@ export async function publishMoraPortfolioAction() {
   return {
     ok: true,
     message: "Your MORA is published.",
+    handle: draft.handle,
+    publicPath: `/${draft.handle}`,
   };
 }
 
-export async function unpublishMoraPortfolioAction() {
+export async function unpublishMoraPortfolioAction(): Promise<PublishActionResult> {
   const { supabase, profile } = await getAuthenticatedProfile();
 
   const { error } = await supabase
@@ -1098,6 +1130,8 @@ export async function unpublishMoraPortfolioAction() {
   return {
     ok: true,
     message: "Your MORA is unpublished.",
+    handle: profile.handle,
+    publicPath: `/${profile.handle}`,
   };
 }
 

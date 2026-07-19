@@ -81,6 +81,111 @@ type GeneratedBlueprint = {
   }[];
 };
 
+const DEMO_PROFILE_HANDLE = "parammittal16";
+const DEMO_UPDATED_AT = "2026-07-19T00:00:00.000Z";
+
+function getDemoPublicPortfolio(handle: string): PublicPortfolio | null {
+  if (handle.toLowerCase() !== DEMO_PROFILE_HANDLE) return null;
+
+  return {
+    profile: {
+      id: "00000000-0000-4000-8000-000000000016",
+      user_id: "00000000-0000-4000-8000-000000000001",
+      handle: DEMO_PROFILE_HANDLE,
+      name: "Param Mittal",
+      headline: "Product builder focused on AI-native portfolio tools",
+      bio: "Editable demo profile for MORA reviewers. Param is presented as a product-minded builder who turns ambiguous ideas into polished web experiences, using careful UX, practical AI workflows, and fast iteration.",
+      avatar_url: null,
+      goal: "showcase_work",
+      theme: "default",
+      is_published: true,
+      created_at: DEMO_UPDATED_AT,
+      updated_at: DEMO_UPDATED_AT,
+    },
+    headline: "Param Mittal builds useful AI product experiences with clear proof and careful craft.",
+    shortBio:
+      "This is realistic demo content created for judging MORA. Every section is intentionally editable: it shows how a founder, builder, or student could present product thinking, implementation quality, and taste without scraping social media.",
+    targetAudience: "hiring teams, collaborators, and hackathon judges looking for product judgment and reliable execution",
+    voice: "direct, thoughtful, practical, and evidence-led",
+    strengths: [
+      {
+        title: "Turns vague ideas into shipped flows",
+        explanation:
+          "Frames the user problem, trims unnecessary surface area, and builds the end-to-end workflow that makes the product usable quickly.",
+        evidence:
+          "Demo evidence: MORA moves from intake to public portfolio with validation, publishing controls, and cache revalidation.",
+      },
+      {
+        title: "Balances AI assistance with user control",
+        explanation:
+          "Uses AI to shape structure and language while keeping submitted content, consent, and editable review at the center of the experience.",
+        evidence:
+          "Demo evidence: social links are display-only, AI is not called during intake, and generated claims must be reviewed.",
+      },
+      {
+        title: "Builds polished interfaces that stay practical",
+        explanation:
+          "Prioritizes scanning, predictable controls, and clear state changes over decorative complexity.",
+        evidence:
+          "Demo evidence: draft and published states are visually distinct, with confirmation before publishing and a success screen after launch.",
+      },
+    ],
+    projects: [
+      {
+        title: "MORA publishing workflow",
+        description:
+          "A portfolio publishing path with required-field validation, confirmation, success sharing, copy-link support, and public-page revalidation.",
+        evidence:
+          "Built as realistic demo content for review; replace this item with your own shipped product, case study, or project summary.",
+        skills: ["Next.js", "Product UX", "Supabase", "Server Actions"],
+        url: null,
+        imageUrl: null,
+      },
+      {
+        title: "Consent-first portfolio intake",
+        description:
+          "A guided intake that captures user-owned images, proof points, projects, stories, and links without scraping external profiles.",
+        evidence:
+          "The workflow separates draft saving, submitted intake, and optional AI blueprint generation.",
+        skills: ["UX writing", "Validation", "AI workflows"],
+        url: null,
+        imageUrl: null,
+      },
+      {
+        title: "Public profile rendering",
+        description:
+          "A cacheable public route that presents strengths, projects, social links, metadata, and alternate recruiter-oriented ordering.",
+        evidence:
+          "The page supports /parammittal16 and a recruiter lens while keeping portfolio data grounded in explicit content.",
+        skills: ["App Router", "ISR", "Metadata"],
+        url: null,
+        imageUrl: null,
+      },
+    ],
+    gallery: [
+      { name: "Editable product workspace screenshot placeholder", url: null },
+      { name: "Portfolio proof image placeholder", url: null },
+      { name: "Launch notes image placeholder", url: null },
+      { name: "Case study visual placeholder", url: null },
+    ],
+    socialLinks: [
+      { label: "Demo website", url: "https://example.com/parammittal16" },
+      { label: "Editable contact", url: "https://example.com/contact" },
+    ],
+    achievements: [
+      "Designed a publishing workflow that distinguishes draft and public states.",
+      "Added validation for name, handle, headline, and portfolio proof before launch.",
+      "Created a demo profile that works without scraped social-media content.",
+    ],
+    skills: ["Product design", "Next.js", "Supabase", "AI product strategy", "UX systems"],
+    stories: [
+      "The best portfolios are not scraped summaries; they are intentional selections of proof.",
+      "A public page should feel shareable only after the owner has reviewed the final state.",
+    ],
+    updatedAt: DEMO_UPDATED_AT,
+  };
+}
+
 function createSupabaseAnonServerClient() {
   const { url, publishableKey } = getSupabasePublicConfig();
 
@@ -206,6 +311,9 @@ function portfolioItemsToProjects(items: PortfolioItem[], signedImages: Map<stri
 
 async function fetchPublicPortfolio(handle: string): Promise<PublicPortfolio | null> {
   const normalizedHandle = handle.toLowerCase();
+  const demoPortfolio = getDemoPublicPortfolio(normalizedHandle);
+  if (demoPortfolio) return demoPortfolio;
+
   const supabase = createSupabaseAnonServerClient();
 
   const { data: profile, error: profileError } = await supabase
@@ -316,7 +424,10 @@ export async function getPublicPortfolio(handle: string) {
 }
 
 export async function getSeededPublicPortfolioParams() {
-  const seededHandle = process.env.NEXT_PUBLIC_DEMO_PROFILE_HANDLE || "mora-demo";
+  const seededHandle = process.env.NEXT_PUBLIC_DEMO_PROFILE_HANDLE || DEMO_PROFILE_HANDLE;
+  const params = [{ handle: DEMO_PROFILE_HANDLE }];
+
+  if (seededHandle === DEMO_PROFILE_HANDLE) return params;
 
   try {
     const supabase = createSupabaseAnonServerClient();
@@ -327,8 +438,8 @@ export async function getSeededPublicPortfolioParams() {
       .eq("is_published", true)
       .maybeSingle();
 
-    return data?.handle ? [{ handle: data.handle }] : [];
+    return data?.handle ? [...params, { handle: data.handle }] : params;
   } catch {
-    return [];
+    return params;
   }
 }

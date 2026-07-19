@@ -81,8 +81,25 @@ type GeneratedBlueprint = {
   }[];
 };
 
-const DEMO_PROFILE_HANDLE = "parammittal16";
+const DEMO_PROFILE_HANDLE = "parammittal1";
 const DEMO_UPDATED_AT = "2026-07-19T00:00:00.000Z";
+
+function createDemoImageSvg(label: string, accent: string, background: string) {
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="${background}"/>
+  <rect x="72" y="72" width="1056" height="756" rx="32" fill="white"/>
+  <rect x="120" y="140" width="420" height="260" rx="24" fill="${accent}"/>
+  <rect x="580" y="140" width="500" height="140" rx="24" fill="#1d2b27" opacity="0.95"/>
+  <rect x="580" y="320" width="500" height="220" rx="24" fill="#e5eee2"/>
+  <circle cx="930" cy="650" r="110" fill="#d95c3b" opacity="0.9"/>
+  <path d="M830 650h200" stroke="#1d2b27" stroke-width="24" stroke-linecap="round"/>
+  <path d="M930 550v200" stroke="#1d2b27" stroke-width="24" stroke-linecap="round"/>
+  <text x="120" y="760" font-family="Arial, sans-serif" font-size="58" fill="#1d2b27">${label}</text>
+</svg>`;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 
 function getDemoPublicPortfolio(handle: string): PublicPortfolio | null {
   if (handle.toLowerCase() !== DEMO_PROFILE_HANDLE) return null;
@@ -139,7 +156,7 @@ function getDemoPublicPortfolio(handle: string): PublicPortfolio | null {
           "Built as realistic demo content for review; replace this item with your own shipped product, case study, or project summary.",
         skills: ["Next.js", "Product UX", "Supabase", "Server Actions"],
         url: null,
-        imageUrl: null,
+        imageUrl: createDemoImageSvg("Publishing workflow", "#d95c3b", "#fffaf4"),
       },
       {
         title: "Consent-first portfolio intake",
@@ -149,7 +166,7 @@ function getDemoPublicPortfolio(handle: string): PublicPortfolio | null {
           "The workflow separates draft saving, submitted intake, and optional AI blueprint generation.",
         skills: ["UX writing", "Validation", "AI workflows"],
         url: null,
-        imageUrl: null,
+        imageUrl: createDemoImageSvg("Intake experience", "#4f735d", "#f7f3ed"),
       },
       {
         title: "Public profile rendering",
@@ -159,14 +176,14 @@ function getDemoPublicPortfolio(handle: string): PublicPortfolio | null {
           "The page supports /parammittal16 and a recruiter lens while keeping portfolio data grounded in explicit content.",
         skills: ["App Router", "ISR", "Metadata"],
         url: null,
-        imageUrl: null,
+        imageUrl: createDemoImageSvg("Public portfolio", "#e8c981", "#e5eee2"),
       },
     ],
     gallery: [
-      { name: "Editable product workspace screenshot placeholder", url: null },
-      { name: "Portfolio proof image placeholder", url: null },
-      { name: "Launch notes image placeholder", url: null },
-      { name: "Case study visual placeholder", url: null },
+      { name: "Editable product workspace screenshot", url: createDemoImageSvg("Editable product workspace", "#d95c3b", "#fffaf4") },
+      { name: "Portfolio proof image", url: createDemoImageSvg("Portfolio proof", "#4f735d", "#f7f3ed") },
+      { name: "Launch notes image", url: createDemoImageSvg("Launch notes", "#e8c981", "#e5eee2") },
+      { name: "Case study visual", url: createDemoImageSvg("Case study", "#1d2b27", "#fffaf4") },
     ],
     socialLinks: [
       { label: "Demo website", url: "https://example.com/parammittal16" },
@@ -215,6 +232,23 @@ function createOptionalSupabaseAdminClient() {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isAbsoluteUrl(value: string) {
+  return /^(https?:)?\/\//i.test(value) || value.startsWith("data:");
+}
+
+function getStorageObjectUrl(path: string) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return null;
+
+  try {
+    const parsedUrl = new URL(supabaseUrl);
+    const encodedPath = encodeURIComponent(path).replace(/%2F/g, "/");
+    return `${parsedUrl.origin}/storage/v1/object/public/${IMAGE_BUCKET}/${encodedPath}`;
+  } catch {
+    return null;
+  }
 }
 
 function asString(value: unknown) {
@@ -278,35 +312,58 @@ function readImages(intake: Record<string, unknown>) {
 }
 
 async function createSignedImageMap(paths: string[]) {
+  console.log('paths', paths);
   if (paths.length === 0) return new Map<string, string>();
 
+  const resolved = new Map<string, string>();
   const supabase = createOptionalSupabaseAdminClient();
-  if (!supabase) return new Map<string, string>();
 
-  const signedUrls = await Promise.all(
-    paths.map(async (path) => {
+  for (const path of paths) {
+    if (!path) continue;
+
+    if (isAbsoluteUrl(path)) {
+      resolved.set(path, path);
+      continue;
+    }
+
+    const fallbackUrl = getStorageObjectUrl(path);
+    if (fallbackUrl) {
+      resolved.set(path, fallbackUrl);
+    }
+
+    if (supabase) {
       const { data, error } = await supabase.storage
         .from(IMAGE_BUCKET)
         .createSignedUrl(path, PUBLIC_PROFILE_REVALIDATE_SECONDS + 300);
 
-      return error || !data?.signedUrl ? null : ([path, data.signedUrl] as const);
-    }),
-  );
+      if (!error && data?.signedUrl) {
+        resolved.set(path, data.signedUrl);
+      }
+    }
+  }
 
-  return new Map(signedUrls.filter((entry): entry is readonly [string, string] => Boolean(entry)));
+  return resolved;
 }
 
 function portfolioItemsToProjects(items: PortfolioItem[], signedImages: Map<string, string>) {
+  console.log(items);
+  
   return items
     .filter((item) => item.type === "project")
-    .map((item) => ({
-      title: item.title,
-      description: item.description || "",
-      evidence: item.evidence_text || "",
-      skills: [],
-      url: item.external_url,
-      imageUrl: item.image_url ? signedImages.get(item.image_url) || item.image_url : null,
-    }));
+    .map((item) => {
+      const imageUrl = item.image_url
+        ? signedImages.get(item.image_url) || item.image_url
+        : null;
+
+      return {
+        title: item.title,
+        description: item.description || "",
+        evidence: item.evidence_text || "",
+        skills: [],
+        url: item.external_url,
+        imageUrl: imageUrl && isAbsoluteUrl(imageUrl) ? imageUrl : null,
+      };
+    });
 }
 
 async function fetchPublicPortfolio(handle: string): Promise<PublicPortfolio | null> {
@@ -352,6 +409,7 @@ async function fetchPublicPortfolio(handle: string): Promise<PublicPortfolio | n
   const intake = readIntake(blueprintRow?.blueprint_json);
   const generated = readGeneratedBlueprint(blueprintRow?.blueprint_json);
   const intakeImages = readImages(intake);
+  console.log(intakeImages);
   const itemImages = (items ?? []).map((item) => item.image_url).filter(Boolean) as string[];
   const signedImages = await createSignedImageMap([
     ...new Set([...intakeImages.map((image) => image.path), ...itemImages]),

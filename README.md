@@ -6,7 +6,7 @@ MORA is a Next.js portfolio application backed by Supabase. This repository curr
 
 1. Create a Supabase project.
 2. Copy `.env.example` to `.env.local` and fill in the values from **Supabase Dashboard → Project Settings → API**.
-3. Apply the SQL migration at `supabase/migrations/20260719000000_create_mora_portfolio_schema.sql` (instructions below).
+3. Apply the SQL migrations at `supabase/migrations/20260719000000_create_mora_portfolio_schema.sql` and `supabase/migrations/20260719001000_create_mora_intake_image_bucket.sql` (instructions below).
 4. Start the app:
 
    ```bash
@@ -19,7 +19,7 @@ The `.env.local` file is ignored by Git. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PU
 ## Supabase dashboard setup
 
 1. In **Project Settings → API**, copy the Project URL and Publishable key into `.env.local`.
-2. In **SQL Editor**, paste and run the migration, or use the Supabase CLI to link the project and run `supabase db push`. The migration creates all tables, indexes, timestamp triggers, grants, RLS policies, and case-insensitive unique handle protection.
+2. In **SQL Editor**, paste and run both migrations in timestamp order, or use the Supabase CLI to link the project and run `supabase db push`. The first migration creates the application schema; the second creates the private `mora-intake-images` bucket and user-scoped Storage policies required by the intake wizard.
 3. In **Authentication → URL Configuration**, add your local URL (for example, `http://localhost:3000`) as a Site URL/redirect URL. Add each deployed URL before enabling sign-in flows.
 4. In **Authentication → Providers**, enable and configure the providers MORA will use. No sign-in UI is included yet.
 5. Before production, add the same three environment variables in your deployment provider. Keep the service-role key restricted to server-side environment settings.

@@ -1,10 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { publicProfileTag } from "@/lib/public-portfolio";
 import type { Json } from "@/types/database";
 
 export type MoraGoal = "get_hired" | "win_clients" | "showcase_work" | "build_community";
@@ -107,6 +108,13 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "i
 const AI_GENERATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 const AI_GENERATION_LIMIT = 3;
 const AI_GENERATION_COOLDOWN_MS = 90 * 1000;
+
+function revalidatePublicPortfolio(handle?: string | null) {
+  if (!handle) return;
+
+  revalidatePath(`/${handle}`);
+  updateTag(publicProfileTag(handle));
+}
 
 function createHandleSeed(email?: string) {
   return (
@@ -310,7 +318,7 @@ async function getAuthenticatedProfile() {
 
   const { data: existingProfile, error: selectError } = await supabase
     .from("profiles")
-    .select("id, user_id, handle, name, goal")
+    .select("id, user_id, handle, name, goal, is_published")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -334,7 +342,7 @@ async function getAuthenticatedProfile() {
       name: user.user_metadata?.full_name ?? null,
       avatar_url: user.user_metadata?.avatar_url ?? null,
     })
-    .select("id, user_id, handle, name, goal")
+    .select("id, user_id, handle, name, goal, is_published")
     .single();
 
   if (insertError) {
@@ -647,6 +655,10 @@ export async function saveMoraDraftAction(
   await upsertBlueprint(profile.id, draft);
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/edit");
+  if (profile.is_published) {
+    revalidatePublicPortfolio(profile.handle);
+    revalidatePublicPortfolio(profileUpdate.handle);
+  }
 
   return { ok: true, message: "Draft saved.", draft };
 }
@@ -773,6 +785,10 @@ export async function uploadMoraDraftImagesAction(formData: FormData): Promise<I
   await upsertBlueprint(profile.id, draft);
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/edit");
+  if (profile.is_published) {
+    revalidatePublicPortfolio(profile.handle);
+    revalidatePublicPortfolio(draft.handle || profile.handle);
+  }
 
   return { ok: true, message: "Images uploaded and draft saved.", draft };
 }
@@ -887,6 +903,10 @@ export async function submitMoraIntakeAction(formData: FormData): Promise<Intake
   await upsertBlueprint(profile.id, draft);
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/edit");
+  if (profile.is_published) {
+    revalidatePublicPortfolio(profile.handle);
+    revalidatePublicPortfolio(draft.handle);
+  }
 
   return { ok: true, message: "Your intake is saved. No AI has been called.", draft };
 }
@@ -1004,11 +1024,80 @@ export async function generatePortfolioBlueprintAction(): Promise<AiGenerationAc
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/edit");
+  if (profile.is_published) {
+    revalidatePublicPortfolio(profile.handle);
+  }
 
   return {
     ok: true,
     message: "AI blueprint generated. Review every claim before using it in your portfolio.",
     blueprint: generated.blueprint,
+  };
+}
+
+export async function publishMoraPortfolioAction() {
+  const { supabase, profile } = await getAuthenticatedProfile();
+  const { existing } = await getLatestBlueprint(profile.id);
+  const draft = normalizeDraft(readIntakeFromBlueprint(existing?.blueprint_json));
+  const fieldErrors = validateDraft(draft, "submit");
+
+  if (Object.keys(fieldErrors).length > 0 || draft.status !== "submitted") {
+    return {
+      ok: false,
+      message: "Complete and submit the intake before publishing.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      handle: draft.handle,
+      name: draft.fullName,
+      headline: draft.role,
+      bio: draft.bio,
+      goal: draft.goal,
+      avatar_url: draft.images[0]?.path ?? null,
+      is_published: true,
+    })
+    .eq("id", profile.id);
+
+  if (error) {
+    return {
+      ok: false,
+      message: error.code === "23505" ? "That handle is already taken." : error.message,
+    };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/publish");
+  revalidatePublicPortfolio(profile.handle);
+  revalidatePublicPortfolio(draft.handle);
+
+  return {
+    ok: true,
+    message: "Your MORA is published.",
+  };
+}
+
+export async function unpublishMoraPortfolioAction() {
+  const { supabase, profile } = await getAuthenticatedProfile();
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ is_published: false })
+    .eq("id", profile.id);
+
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/publish");
+  revalidatePublicPortfolio(profile.handle);
+
+  return {
+    ok: true,
+    message: "Your MORA is unpublished.",
   };
 }
 

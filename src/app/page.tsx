@@ -33,8 +33,9 @@ export default function Home() {
             <a className="transition-colors hover:text-[#d95c3b] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b]" href="#why-mora">Why MORA</a>
             <a className="transition-colors hover:text-[#d95c3b] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b]" href="#how-it-works">How it works</a>
             <a className="transition-colors hover:text-[#d95c3b] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b]" href="#made-for-you">Made for you</a>
+            <a className="transition-colors hover:text-[#d95c3b] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b]" href="/sign-in">Sign in</a>
           </nav>
-          <a href="#start" className="inline-flex items-center gap-2 rounded-full bg-[#1d2b27] px-4 py-2.5 text-sm font-medium text-[#fffaf4] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b] sm:px-5">
+          <a href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[#1d2b27] px-4 py-2.5 text-sm font-medium text-[#fffaf4] transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b] sm:px-5">
             Create my portfolio <ArrowUpRight />
           </a>
         </header>
@@ -49,7 +50,7 @@ export default function Home() {
               An AI portfolio generator that starts with what you choose to share — then helps you turn it into work that feels unmistakably yours.
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-4">
-              <a href="#start" className="inline-flex items-center gap-2 rounded-full bg-[#d95c3b] px-6 py-3.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1d2b27]">
+              <a href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[#d95c3b] px-6 py-3.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1d2b27]">
                 Create my portfolio <ArrowUpRight />
               </a>
               <a href="#how-it-works" className="inline-flex items-center gap-2 rounded-full border border-[#1d2b27]/20 px-6 py-3.5 text-sm font-semibold transition-colors hover:border-[#1d2b27] hover:bg-white/40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b]">
@@ -109,7 +110,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="start" className="bg-[#d95c3b] text-white"><div className="mx-auto max-w-[1440px] px-5 py-20 sm:px-8 md:px-12 md:py-28"><div className="max-w-4xl"><p className="text-xs font-semibold tracking-[0.16em] text-[#fff3e8]/80 uppercase">Make the introduction</p><h2 className="mt-4 font-serif text-[clamp(3.5rem,7vw,6.5rem)] leading-[0.9] tracking-[-0.07em]">Your next opportunity should meet the real you.</h2><p className="mt-7 max-w-xl text-lg leading-8 text-[#fff3e8]/85">Start with the work you have already done. Take the lead from there.</p><a href="mailto:hello@mora.example?subject=Create%20my%20portfolio" className="mt-9 inline-flex items-center gap-2 rounded-full bg-[#1d2b27] px-6 py-3.5 text-sm font-semibold transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Create my portfolio <ArrowUpRight /></a></div></div></section>
+      <section id="start" className="bg-[#d95c3b] text-white"><div className="mx-auto max-w-[1440px] px-5 py-20 sm:px-8 md:px-12 md:py-28"><div className="max-w-4xl"><p className="text-xs font-semibold tracking-[0.16em] text-[#fff3e8]/80 uppercase">Make the introduction</p><h2 className="mt-4 font-serif text-[clamp(3.5rem,7vw,6.5rem)] leading-[0.9] tracking-[-0.07em]">Your next opportunity should meet the real you.</h2><p className="mt-7 max-w-xl text-lg leading-8 text-[#fff3e8]/85">Start with the work you have already done. Take the lead from there.</p><a href="/sign-up" className="mt-9 inline-flex items-center gap-2 rounded-full bg-[#1d2b27] px-6 py-3.5 text-sm font-semibold transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">Create my portfolio <ArrowUpRight /></a></div></div></section>
 
       <footer className="bg-[#1d2b27] text-[#fffaf4]"><div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 py-8 sm:px-8 md:flex-row md:items-center md:justify-between md:px-12"><p className="text-lg font-semibold tracking-[-0.08em]">MORA</p><p className="text-sm text-[#fffaf4]/50">Your work. Your words. Your next move.</p><a href="#top" className="text-sm text-[#fffaf4]/65 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#e8c981]">Back to top ↑</a></div></footer>
     </main>

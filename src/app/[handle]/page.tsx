@@ -363,7 +363,6 @@ export default async function PortfolioPage({ params, searchParams }: PortfolioP
       {orderedSections.map((section) => (
         <div key={section}>{sections[section as keyof typeof sections]}</div>
       ))}
-      <>{console.log(portfolio)}</>
     </main>
   );
 }

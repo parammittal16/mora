@@ -12,8 +12,11 @@ type AuthFormProps = {
   mode: AuthMode;
 };
 
+const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+
 function getAuthCallbackUrl() {
-  return `${window.location.origin}/auth/callback`;
+  const origin = configuredSiteUrl || window.location.origin;
+  return `${origin}/auth/callback`;
 }
 
 export function AuthForm({ mode }: AuthFormProps) {
@@ -88,23 +91,6 @@ export function AuthForm({ mode }: AuthFormProps) {
     setStatus("Magic link sent. Open it on this device to continue to your dashboard.");
   }
 
-  async function handleGoogleSignIn() {
-    setIsSubmitting(true);
-    setStatus(null);
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${getAuthCallbackUrl()}?next=${encodeURIComponent(next)}`,
-      },
-    });
-
-    if (error) {
-      setIsSubmitting(false);
-      setStatus(error.message);
-    }
-  }
-
   return (
     <div className="w-full max-w-md">
       <div className="mb-8">
@@ -119,24 +105,6 @@ export function AuthForm({ mode }: AuthFormProps) {
             ? "Start shaping a professional portfolio from the proof you choose to share."
             : "Sign in to edit, preview, and publish your MORA portfolio."}
         </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={handleGoogleSignIn}
-        disabled={isSubmitting}
-        className="flex h-12 w-full items-center justify-center gap-3 rounded-md border border-[#1d2b27]/15 bg-white px-4 text-sm font-semibold text-[#1d2b27] shadow-sm transition-colors hover:border-[#1d2b27]/35 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d95c3b] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="grid h-5 w-5 place-items-center rounded-full border border-[#1d2b27]/20 text-xs font-bold">
-          G
-        </span>
-        Continue with Google
-      </button>
-
-      <div className="my-7 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-[#1d2b27]/45">
-        <span className="h-px flex-1 bg-[#1d2b27]/12" />
-        or
-        <span className="h-px flex-1 bg-[#1d2b27]/12" />
       </div>
 
       <form onSubmit={handlePasswordSubmit} className="space-y-4">

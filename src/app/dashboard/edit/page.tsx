@@ -1,4 +1,4 @@
-import { createProfileAction, type MoraIntakeDraft } from "@/app/dashboard/actions";
+import { createProfileAction, type AiPortfolioBlueprint, type MoraIntakeDraft } from "@/app/dashboard/actions";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { MoraWizard } from "./MoraWizard";
@@ -39,6 +39,16 @@ function readIntakeDraft(value: unknown): Partial<MoraIntakeDraft> {
 
   const blueprint = value as { intake?: Partial<MoraIntakeDraft> };
   return blueprint.intake && typeof blueprint.intake === "object" ? blueprint.intake : {};
+}
+
+function readGeneratedBlueprint(value: unknown): AiPortfolioBlueprint | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const blueprint = value as { generated_blueprint?: AiPortfolioBlueprint };
+  const generated = blueprint.generated_blueprint;
+  return generated && typeof generated === "object" && "positioning" in generated ? generated : undefined;
 }
 
 export default async function EditPage() {
@@ -99,5 +109,11 @@ export default async function EditPage() {
     bio: savedDraft.bio ?? profile.bio ?? "",
   };
 
-  return <MoraWizard initialDraft={initialDraft} projectName={getProjectName()} />;
+  return (
+    <MoraWizard
+      initialDraft={initialDraft}
+      initialBlueprint={readGeneratedBlueprint(blueprint?.blueprint_json)}
+      projectName={getProjectName()}
+    />
+  );
 }

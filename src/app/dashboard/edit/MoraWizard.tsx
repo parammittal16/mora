@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
+  generatePortfolioBlueprintAction,
   saveMoraDraftAction,
   submitMoraIntakeAction,
   uploadMoraDraftImagesAction,
   validateHandleAction,
+  type AiPortfolioBlueprint,
   type IntakeActionResult,
   type IntakeLink,
   type MoraGoal,
@@ -15,6 +17,7 @@ import {
 
 type WizardProps = {
   initialDraft: MoraIntakeDraft;
+  initialBlueprint?: AiPortfolioBlueprint;
   projectName: string;
 };
 
@@ -27,6 +30,7 @@ const steps = [
   { title: "Work", hint: "Projects and stories" },
   { title: "Images", hint: "Owned visuals" },
   { title: "Consent", hint: "Review and submit" },
+  { title: "Blueprint", hint: "AI review" },
 ];
 
 const goalOptions: { value: MoraGoal; label: string; detail: string }[] = [
@@ -89,11 +93,17 @@ function isResultWithDraft(result: IntakeActionResult): result is IntakeActionRe
   return Boolean(result.draft);
 }
 
-export function MoraWizard({ initialDraft, projectName }: WizardProps) {
+export function MoraWizard({ initialDraft, initialBlueprint, projectName }: WizardProps) {
   const [draft, setDraft] = useState(() => mergeDraft(initialDraft));
+  const [generatedBlueprint, setGeneratedBlueprint] = useState(initialBlueprint);
   const [step, setStep] = useState(Math.min(initialDraft.currentStep || 0, steps.length - 1));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("Draft autosaves as you move through the wizard.");
+  const [aiMessage, setAiMessage] = useState(
+    initialBlueprint
+      ? "Saved AI blueprint loaded. Review every claim before using it."
+      : "Generate a blueprint after submitting intake.",
+  );
   const [handleStatus, setHandleStatus] = useState<"idle" | "checking" | "valid" | "invalid">(
     initialDraft.handle ? "valid" : "idle",
   );
@@ -116,8 +126,9 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
       Boolean(listCompletion(draft.projects) && listCompletion(draft.stories)),
       totalImages >= 4 && totalImages <= 8,
       draft.consent,
+      Boolean(generatedBlueprint),
     ],
-    [draft, totalImages],
+    [draft, generatedBlueprint, totalImages],
   );
   const progress = Math.round(((completedSteps.filter(Boolean).length || step + 1) / steps.length) * 100);
 
@@ -235,6 +246,22 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
       if (result.ok) {
         setSelectedFiles([]);
         setStep(steps.length - 1);
+      }
+    });
+  }
+
+  function generateBlueprint() {
+    setAiMessage("Generating your portfolio blueprint...");
+
+    startTransition(async () => {
+      const result = await generatePortfolioBlueprintAction();
+      setAiMessage(
+        result.retryAfterSeconds
+          ? `${result.message} Retry in ${result.retryAfterSeconds} seconds.`
+          : result.message,
+      );
+      if (result.blueprint) {
+        setGeneratedBlueprint(result.blueprint);
       }
     });
   }
@@ -532,11 +559,21 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
               </p>
             </div>
           )}
+
+          {step === 6 && (
+            <BlueprintReview
+              blueprint={generatedBlueprint}
+              isSubmitted={draft.status === "submitted"}
+              isPending={isPending}
+              message={aiMessage}
+              onGenerate={generateBlueprint}
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-3 border-t border-[#1d2b27]/10 bg-[#fffaf4] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-sm text-[#1d2b27]/65" aria-live="polite">
-            {isPending ? "Saving..." : message}
+            {isPending ? (step === 6 ? "Generating..." : "Saving...") : step === 6 ? aiMessage : message}
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
@@ -547,15 +584,17 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
             >
               Back
             </button>
-            <button
-              type="button"
-              onClick={() => saveDraft(step)}
-              disabled={isPending}
-              className="rounded-md border border-[#1d2b27]/15 bg-white px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Save draft
-            </button>
-            {step < steps.length - 1 ? (
+            {step < 6 && (
+              <button
+                type="button"
+                onClick={() => saveDraft(step)}
+                disabled={isPending}
+                className="rounded-md border border-[#1d2b27]/15 bg-white px-4 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save draft
+              </button>
+            )}
+            {step < 5 && (
               <button
                 type="button"
                 onClick={() => goToStep(step + 1)}
@@ -564,7 +603,8 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
               >
                 Continue
               </button>
-            ) : (
+            )}
+            {step === 5 && (
               <button
                 type="button"
                 onClick={submitIntake}
@@ -572,6 +612,16 @@ export function MoraWizard({ initialDraft, projectName }: WizardProps) {
                 className="rounded-md bg-[#d95c3b] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Submit intake
+              </button>
+            )}
+            {step === 6 && (
+              <button
+                type="button"
+                onClick={generateBlueprint}
+                disabled={isPending || draft.status !== "submitted"}
+                className="rounded-md bg-[#d95c3b] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {generatedBlueprint ? "Regenerate" : "Generate blueprint"}
               </button>
             )}
           </div>
@@ -749,6 +799,142 @@ function LinksEditor({
         ))}
       </div>
     </div>
+  );
+}
+
+function BlueprintReview({
+  blueprint,
+  isSubmitted,
+  isPending,
+  message,
+  onGenerate,
+}: {
+  blueprint?: AiPortfolioBlueprint;
+  isSubmitted: boolean;
+  isPending: boolean;
+  message: string;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="grid gap-5">
+      <div className="rounded-lg border border-[#1d2b27]/10 bg-[#f7f3ed] p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold">AI portfolio blueprint</p>
+            <p className="mt-2 text-sm leading-6 text-[#1d2b27]/65">
+              The generator uses only your submitted text and image metadata. Review every claim before applying it to your public portfolio.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={!isSubmitted || isPending}
+            className="rounded-md bg-[#d95c3b] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {blueprint ? "Regenerate" : "Generate"}
+          </button>
+        </div>
+        {!isSubmitted && (
+          <p className="mt-4 rounded-md border border-[#b93d25]/20 bg-white px-4 py-3 text-sm text-[#b93d25]">
+            Submit the consent-first intake before generating a blueprint.
+          </p>
+        )}
+        <p className="mt-4 text-sm text-[#1d2b27]/65" aria-live="polite">
+          {isPending ? "Generating..." : message}
+        </p>
+      </div>
+
+      {!blueprint ? (
+        <div className="rounded-lg border border-dashed border-[#1d2b27]/20 bg-[#fffaf4] p-6 text-sm leading-6 text-[#1d2b27]/65">
+          No generated blueprint yet. Once generated, this screen will show positioning, strengths, projects, media order, visual direction, and missing proof suggestions.
+        </div>
+      ) : (
+        <div className="grid gap-5">
+          <section className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+            <p className="text-sm font-semibold">Positioning</p>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <ReviewItem label="Headline" value={blueprint.positioning.headline} />
+              <ReviewItem label="Short bio" value={blueprint.positioning.short_bio} />
+              <ReviewItem label="Voice" value={blueprint.positioning.voice} />
+              <ReviewItem label="Target audience" value={blueprint.positioning.target_audience} />
+            </dl>
+          </section>
+
+          <section className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+            <p className="text-sm font-semibold">Strengths</p>
+            <div className="mt-4 grid gap-3">
+              {blueprint.strengths.map((strength, index) => (
+                <EvidenceCard
+                  key={`${strength.title}-${index}`}
+                  title={strength.title}
+                  description={strength.explanation}
+                  evidence={strength.evidence_text}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+            <p className="text-sm font-semibold">Featured projects</p>
+            <div className="mt-4 grid gap-3">
+              {blueprint.featured_projects.map((project, index) => (
+                <EvidenceCard
+                  key={`${project.title}-${index}`}
+                  title={project.title}
+                  description={`${project.description} Skills: ${project.relevant_skills.join(", ") || "Not specified"}.`}
+                  evidence={project.evidence_text}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="grid gap-5 lg:grid-cols-2">
+            <div className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+              <p className="text-sm font-semibold">Recommended media order</p>
+              <ol className="mt-4 grid gap-2 text-sm text-[#1d2b27]/70">
+                {blueprint.recommended_media_order.length ? (
+                  blueprint.recommended_media_order.map((item, index) => <li key={`${item}-${index}`}>{index + 1}. {item}</li>)
+                ) : (
+                  <li>No media order recommended.</li>
+                )}
+              </ol>
+            </div>
+            <div className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+              <p className="text-sm font-semibold">Visual direction</p>
+              <dl className="mt-4 grid gap-3 text-sm">
+                <ReviewItem label="Palette" value={blueprint.visual_direction.palette} />
+                <ReviewItem label="Typography mood" value={blueprint.visual_direction.typography_mood} />
+                <ReviewItem label="Layout style" value={blueprint.visual_direction.layout_style} />
+              </dl>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-[#1d2b27]/10 bg-[#fffaf4] p-5">
+            <p className="text-sm font-semibold">Missing proof suggestions</p>
+            <ul className="mt-4 grid gap-2 text-sm leading-6 text-[#1d2b27]/70">
+              {blueprint.missing_proof_suggestions.length ? (
+                blueprint.missing_proof_suggestions.map((suggestion, index) => <li key={`${suggestion}-${index}`}>{suggestion}</li>)
+              ) : (
+                <li>No missing proof suggestions returned.</li>
+              )}
+            </ul>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceCard({ title, description, evidence }: { title: string; description: string; evidence: string }) {
+  return (
+    <article className="rounded-lg border border-[#1d2b27]/10 bg-white p-4">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-[#1d2b27]/68">{description}</p>
+      <p className="mt-3 rounded-md bg-[#f7f3ed] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#1d2b27]/55">
+        Evidence
+      </p>
+      <p className="mt-2 text-sm leading-6 text-[#1d2b27]/70">{evidence}</p>
+    </article>
   );
 }
 

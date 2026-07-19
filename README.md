@@ -16,6 +16,20 @@ MORA is a Next.js portfolio application backed by Supabase. This repository curr
 
 The `.env.local` file is ignored by Git. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are deliberately browser-safe Supabase credentials. `SUPABASE_SERVICE_ROLE_KEY` is a server secret: do not prefix it with `NEXT_PUBLIC_`, do not place it in client components, and only set it if trusted server-only admin/background work needs it.
 
+### AI blueprint generation
+
+MORA's portfolio blueprint generator runs only in server actions and uses an OpenAI-compatible chat completions API. The browser never receives the provider key. For OpenRouter, add these server-only variables to `.env.local` and your deployment provider:
+
+```bash
+OPENAI_COMPATIBLE_API_KEY=your_openrouter_key
+OPENAI_COMPATIBLE_MODEL=openrouter/model-id
+OPENAI_COMPATIBLE_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_COMPATIBLE_SITE_URL=http://localhost:3000
+OPENAI_COMPATIBLE_APP_NAME=MORA
+```
+
+`OPENAI_COMPATIBLE_BASE_URL` defaults to `https://openrouter.ai/api/v1` when omitted. `OPENAI_COMPATIBLE_SITE_URL` and `OPENAI_COMPATIBLE_APP_NAME` are optional OpenRouter metadata headers. Do not prefix the API key with `NEXT_PUBLIC_`.
+
 ## Supabase dashboard setup
 
 1. In **Project Settings → API**, copy the Project URL and Publishable key into `.env.local`.

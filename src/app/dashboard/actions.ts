@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
@@ -40,6 +41,52 @@ export type MoraIntakeDraft = {
   submittedAt?: string;
 };
 
+const aiPortfolioBlueprintSchema = z.object({
+  positioning: z.object({
+    headline: z.string().min(1).max(140),
+    short_bio: z.string().min(1).max(700),
+    voice: z.string().min(1).max(160),
+    target_audience: z.string().min(1).max(180),
+  }),
+  strengths: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(100),
+        explanation: z.string().min(1).max(360),
+        evidence_text: z.string().min(1).max(360),
+      }),
+    )
+    .min(1)
+    .max(6),
+  featured_projects: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(120),
+        description: z.string().min(1).max(500),
+        relevant_skills: z.array(z.string().min(1).max(60)).max(8),
+        evidence_text: z.string().min(1).max(420),
+      }),
+    )
+    .min(1)
+    .max(6),
+  recommended_media_order: z.array(z.string().min(1).max(140)).max(8),
+  visual_direction: z.object({
+    palette: z.string().min(1).max(180),
+    typography_mood: z.string().min(1).max(160),
+    layout_style: z.string().min(1).max(220),
+  }),
+  missing_proof_suggestions: z.array(z.string().min(1).max(260)).max(8),
+});
+
+export type AiPortfolioBlueprint = z.infer<typeof aiPortfolioBlueprintSchema>;
+
+export type AiGenerationActionResult = {
+  ok: boolean;
+  message: string;
+  blueprint?: AiPortfolioBlueprint;
+  retryAfterSeconds?: number;
+};
+
 export type IntakeActionResult = {
   ok: boolean;
   message: string;
@@ -57,6 +104,9 @@ const GOALS: MoraGoal[] = [
 const IMAGE_BUCKET = "mora-intake-images";
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const AI_GENERATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const AI_GENERATION_LIMIT = 3;
+const AI_GENERATION_COOLDOWN_MS = 90 * 1000;
 
 function createHandleSeed(email?: string) {
   return (
@@ -162,6 +212,62 @@ function normalizeDraft(input: Partial<MoraIntakeDraft>): MoraIntakeDraft {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readIntakeFromBlueprint(value: unknown) {
+  return isRecord(value) && isRecord(value.intake)
+    ? (value.intake as Partial<MoraIntakeDraft>)
+    : {};
+}
+
+function readGeneratedBlueprint(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  const parsed = aiPortfolioBlueprintSchema.safeParse(value.generated_blueprint);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function readGenerationAttempts(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.ai_generation)) return [];
+  const attempts = value.ai_generation.attempts;
+  return (Array.isArray(attempts) ? attempts : [])
+    .map((attempt) => (typeof attempt === "string" ? Date.parse(attempt) : Number.NaN))
+    .filter(Number.isFinite);
+}
+
+function createBlueprintPayload({
+  current,
+  draft,
+  generatedBlueprint,
+  attempts,
+}: {
+  current: unknown;
+  draft: MoraIntakeDraft;
+  generatedBlueprint?: AiPortfolioBlueprint;
+  attempts?: string[];
+}) {
+  const existing = isRecord(current) ? current : {};
+  const existingGeneration = isRecord(existing.ai_generation) ? existing.ai_generation : {};
+  const savedAttempts = Array.isArray(existingGeneration.attempts)
+    ? existingGeneration.attempts.filter((attempt): attempt is string => typeof attempt === "string")
+    : [];
+
+  return {
+    ...existing,
+    source: "mora_intake_v1",
+    socialLinksPolicy: "display_only_never_scrape",
+    intake: draft,
+    ...(generatedBlueprint ? { generated_blueprint: generatedBlueprint } : {}),
+    ai_generation: {
+      ...existingGeneration,
+      provider: "openai_compatible",
+      ...(generatedBlueprint ? { lastGeneratedAt: new Date().toISOString() } : {}),
+      attempts: attempts ?? savedAttempts,
+    },
+  };
+}
+
 function validateDraft(draft: MoraIntakeDraft, mode: "draft" | "submit") {
   const fieldErrors: Record<string, string> = {};
 
@@ -258,17 +364,11 @@ async function assertHandleAvailable(handle: string, profileId: string) {
   return existing ? "That handle is already taken." : null;
 }
 
-async function upsertBlueprint(profileId: string, draft: MoraIntakeDraft) {
+async function getLatestBlueprint(profileId: string) {
   const supabase = await createSupabaseServerClient();
-  const blueprint = {
-    source: "mora_intake_v1",
-    socialLinksPolicy: "display_only_never_scrape",
-    intake: draft,
-  };
-
   const { data: existing, error: selectError } = await supabase
     .from("portfolio_blueprints")
-    .select("id")
+    .select("id, blueprint_json")
     .eq("profile_id", profileId)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -277,6 +377,18 @@ async function upsertBlueprint(profileId: string, draft: MoraIntakeDraft) {
   if (selectError) {
     throw new Error(selectError.message);
   }
+
+  return { supabase, existing };
+}
+
+async function upsertBlueprint(profileId: string, draft: MoraIntakeDraft) {
+  const { supabase, existing } = await getLatestBlueprint(profileId);
+  const generatedBlueprint = readGeneratedBlueprint(existing?.blueprint_json);
+  const blueprint = createBlueprintPayload({
+    current: existing?.blueprint_json,
+    draft,
+    generatedBlueprint,
+  });
 
   const { error } = existing
     ? await supabase
@@ -290,6 +402,162 @@ async function upsertBlueprint(profileId: string, draft: MoraIntakeDraft) {
 
   if (error) {
     throw new Error(error.message);
+  }
+}
+
+function getAiProviderConfig() {
+  const apiKey = process.env.OPENAI_COMPATIBLE_API_KEY || process.env.OPENROUTER_API_KEY;
+  const baseUrl =
+    process.env.OPENAI_COMPATIBLE_BASE_URL ||
+    process.env.OPENROUTER_BASE_URL ||
+    "https://openrouter.ai/api/v1";
+  const model = process.env.OPENAI_COMPATIBLE_MODEL || process.env.OPENROUTER_MODEL;
+
+  if (!apiKey || !model) {
+    return {
+      ok: false as const,
+      message:
+        "AI generation is not configured. Set OPENAI_COMPATIBLE_API_KEY and OPENAI_COMPATIBLE_MODEL on the server.",
+    };
+  }
+
+  return { ok: true as const, apiKey, baseUrl: baseUrl.replace(/\/$/, ""), model };
+}
+
+function createAiPrompt(draft: MoraIntakeDraft) {
+  const imageMetadata = draft.images.map((image, index) => ({
+    id: `image_${index + 1}`,
+    name: image.name,
+    type: image.type,
+    size: image.size,
+    uploadedAt: image.uploadedAt,
+  }));
+
+  return [
+    "Create a portfolio blueprint from only the submitted intake below.",
+    "Critical rules:",
+    "- Never invent employers, achievements, skills, metrics, clients, dates, or projects.",
+    "- Every claim must be traceable to the submitted evidence.",
+    "- Use evidence_text copied or closely grounded in the submitted text.",
+    "- If evidence is weak, say that clearly in missing_proof_suggestions.",
+    "- Social links are display-only metadata. Do not infer facts from them and do not scrape them.",
+    "- Images are metadata only. Do not infer visual content beyond filename/type/size.",
+    "",
+    "Return only strict JSON matching this TypeScript shape:",
+    JSON.stringify(
+      {
+        positioning: {
+          headline: "string",
+          short_bio: "string",
+          voice: "string",
+          target_audience: "string",
+        },
+        strengths: [{ title: "string", explanation: "string", evidence_text: "string" }],
+        featured_projects: [
+          {
+            title: "string",
+            description: "string",
+            relevant_skills: ["string"],
+            evidence_text: "string",
+          },
+        ],
+        recommended_media_order: ["image_1"],
+        visual_direction: {
+          palette: "string",
+          typography_mood: "string",
+          layout_style: "string",
+        },
+        missing_proof_suggestions: ["string"],
+      },
+      null,
+      2,
+    ),
+    "",
+    "Submitted text:",
+    JSON.stringify(
+      {
+        fullName: draft.fullName,
+        handle: draft.handle,
+        role: draft.role,
+        goal: draft.goal,
+        bio: draft.bio,
+        socialLinks: draft.socialLinks,
+        skills: draft.skills,
+        achievements: draft.achievements,
+        projects: draft.projects,
+        stories: draft.stories,
+        imageMetadata,
+      },
+      null,
+      2,
+    ),
+  ].join("\n");
+}
+
+function parseJsonObject(content: string) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("The AI response did not include JSON.");
+    return JSON.parse(match[0]);
+  }
+}
+
+async function callOpenAiCompatibleProvider(draft: MoraIntakeDraft) {
+  const config = getAiProviderConfig();
+  if (!config.ok) return config;
+
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.OPENAI_COMPATIBLE_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "",
+        "X-Title": process.env.OPENAI_COMPATIBLE_APP_NAME || "MORA",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a cautious portfolio strategist. You must ground every claim in the user's provided evidence and return only valid JSON.",
+          },
+          { role: "user", content: createAiPrompt(draft) },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        message: `AI provider request failed with status ${response.status}. Try again later.`,
+      };
+    }
+
+    const data = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      return { ok: false as const, message: "AI provider returned an empty response." };
+    }
+
+    const parsed = aiPortfolioBlueprintSchema.safeParse(parseJsonObject(content));
+    if (!parsed.success) {
+      return {
+        ok: false as const,
+        message: "AI returned a blueprint in an unexpected format. Please retry.",
+      };
+    }
+
+    return { ok: true as const, blueprint: parsed.data };
+  } catch {
+    return { ok: false as const, message: "AI generation failed. Please retry." };
   }
 }
 
@@ -622,3 +890,125 @@ export async function submitMoraIntakeAction(formData: FormData): Promise<Intake
 
   return { ok: true, message: "Your intake is saved. No AI has been called.", draft };
 }
+
+export async function generatePortfolioBlueprintAction(): Promise<AiGenerationActionResult> {
+  const { profile } = await getAuthenticatedProfile();
+  const { supabase, existing } = await getLatestBlueprint(profile.id);
+  const currentJson = existing?.blueprint_json;
+  const draft = normalizeDraft(readIntakeFromBlueprint(currentJson));
+  const fieldErrors = validateDraft(draft, "submit");
+
+  if (draft.status !== "submitted") {
+    return {
+      ok: false,
+      message: "Submit the intake before generating an AI portfolio blueprint.",
+    };
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return {
+      ok: false,
+      message: "The saved intake is missing required evidence. Return to the intake steps and complete it first.",
+    };
+  }
+
+  const providerConfig = getAiProviderConfig();
+  if (!providerConfig.ok) {
+    return { ok: false, message: providerConfig.message };
+  }
+
+  const now = Date.now();
+  const recentAttempts = readGenerationAttempts(currentJson).filter(
+    (attempt) => now - attempt < AI_GENERATION_WINDOW_MS,
+  );
+  const latestAttempt = Math.max(0, ...recentAttempts);
+  const cooldownRemaining = AI_GENERATION_COOLDOWN_MS - (now - latestAttempt);
+  const existingBlueprint = readGeneratedBlueprint(currentJson);
+
+  if (cooldownRemaining > 0) {
+    return {
+      ok: false,
+      message: "Please wait a moment before generating again.",
+      retryAfterSeconds: Math.ceil(cooldownRemaining / 1000),
+      blueprint: existingBlueprint,
+    };
+  }
+
+  if (recentAttempts.length >= AI_GENERATION_LIMIT) {
+    return {
+      ok: false,
+      message: "You have reached the AI generation limit for today. Review the current blueprint or try tomorrow.",
+      retryAfterSeconds: Math.ceil((AI_GENERATION_WINDOW_MS - (now - recentAttempts[0])) / 1000),
+      blueprint: existingBlueprint,
+    };
+  }
+
+  const attemptIso = new Date(now).toISOString();
+  const attempts = [...recentAttempts.map((attempt) => new Date(attempt).toISOString()), attemptIso];
+  const attemptPayload = createBlueprintPayload({
+    current: currentJson,
+    draft,
+    generatedBlueprint: existingBlueprint,
+    attempts,
+  });
+
+  let blueprintId = existing?.id;
+  if (blueprintId) {
+    const { error: attemptError } = await supabase
+      .from("portfolio_blueprints")
+      .update({ blueprint_json: attemptPayload as Json })
+      .eq("id", blueprintId);
+
+    if (attemptError) {
+      return { ok: false, message: attemptError.message, blueprint: existingBlueprint };
+    }
+  } else {
+    const { data: inserted, error: attemptError } = await supabase
+      .from("portfolio_blueprints")
+      .insert({
+        profile_id: profile.id,
+        blueprint_json: attemptPayload as Json,
+      })
+      .select("id")
+      .single();
+
+    if (attemptError) {
+      return { ok: false, message: attemptError.message, blueprint: existingBlueprint };
+    }
+    blueprintId = inserted.id;
+  }
+
+  const generated = await callOpenAiCompatibleProvider(draft);
+  if (!generated.ok) {
+    return {
+      ok: false,
+      message: generated.message,
+      blueprint: existingBlueprint,
+    };
+  }
+
+  const finalPayload = createBlueprintPayload({
+    current: attemptPayload,
+    draft,
+    generatedBlueprint: generated.blueprint,
+    attempts,
+  });
+  const { error: saveError } = await supabase
+    .from("portfolio_blueprints")
+    .update({ blueprint_json: finalPayload as Json })
+    .eq("id", blueprintId);
+
+  if (saveError) {
+    return { ok: false, message: saveError.message, blueprint: generated.blueprint };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/edit");
+
+  return {
+    ok: true,
+    message: "AI blueprint generated. Review every claim before using it in your portfolio.",
+    blueprint: generated.blueprint,
+  };
+}
+
